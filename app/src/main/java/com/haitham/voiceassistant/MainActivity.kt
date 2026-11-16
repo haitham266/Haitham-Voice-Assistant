@@ -59,6 +59,8 @@ class MainActivity : ComponentActivity() {
     private var hasCustomModel by mutableStateOf(false)
     private var startAfterPermissions = false
     private var aiStatus by mutableStateOf("")
+    private var probeResults by mutableStateOf(listOf<com.haitham.voiceassistant.speech.EngineProbe.Outcome>())
+    private val probe by lazy { com.haitham.voiceassistant.speech.EngineProbe(this) }
     private val onDevice by lazy { com.haitham.voiceassistant.speech.OnDeviceRecognizer(this) }
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -98,6 +100,7 @@ class MainActivity : ComponentActivity() {
                         SettingsScreen(
                             settings = settings, state = state, hasCustomModel = hasCustomModel,
                             aiStatus = aiStatus.ifBlank { state.aiEngineInfo },
+                            probeResults = probeResults,
                             importStatus = importStatus, refreshKey = pv, actions = settingsActions(),
                             onBack = { showSettings = false }
                         )
@@ -154,7 +157,11 @@ class MainActivity : ComponentActivity() {
         setConfirm = { v -> lifecycleScope.launch { settingsRepo.setConfirmWhenUnsure(v) } },
         setRequireWakeWord = { v -> lifecycleScope.launch { settingsRepo.setRequireWakeWord(v) } },
         setCommandEngine = { v -> lifecycleScope.launch { settingsRepo.setCommandEngine(v) } },
-        checkAi = { aiStatus = "جارٍ الفحص…"; onDevice.checkSupport { aiStatus = it.label; AssistantRepository.aiInfo(it.label) } },
+        checkAi = { runProbe() },
+        selectEngine = { o ->
+            lifecycleScope.launch { settingsRepo.setAiEngine(o.engine.id, o.locale ?: "ar-SA"); settingsRepo.setCommandEngine(AssistantSettings.ENGINE_AI) }
+            aiStatus = "تم اختيار: ${o.engine.label} (${o.locale})"
+        },
         downloadArabic = {
             onDevice.checkSupport { st ->
                 if (st is com.haitham.voiceassistant.speech.OnDeviceRecognizer.Support.Ready) aiStatus = st.label
@@ -198,6 +205,41 @@ class MainActivity : ComponentActivity() {
         },
         analyzeText = { text -> analyze(text) }
     )
+
+    /** Live voice test of every recogniser on the phone; the assistant is paused meanwhile (it uses the mic). */
+    private fun runProbe() {
+        if (!Permissions.granted(this, Manifest.permission.RECORD_AUDIO)) { requestPermissions(false); return }
+        val engines = com.haitham.voiceassistant.speech.OnDeviceRecognizer.listEngines(this)
+        if (engines.isEmpty()) { aiStatus = "لا يوجد أي محرك تعرف على الكلام في الهاتف"; return }
+        val wasRunning = AssistantRepository.state.value.serviceRunning
+        if (wasRunning) VoiceForegroundService.stop(this)
+        probeResults = emptyList()
+        aiStatus = "وُجد ${engines.size} محرك. استعد…"
+        window.decorView.postDelayed({
+            probe.run(engines, onStep = { aiStatus = it }) { results ->
+                probeResults = results
+                // Prefer the phone's internal (offline) engine, then any other that understood.
+                val best = results.firstOrNull { it.ok && it.engine.id == com.haitham.voiceassistant.speech.OnDeviceRecognizer.ENGINE_SYSTEM }
+                    ?: results.firstOrNull { it.ok }
+                if (best != null) {
+                    lifecycleScope.launch {
+                        settingsRepo.setAiEngine(best.engine.id, best.locale ?: "ar-SA")
+                        settingsRepo.setCommandEngine(AssistantSettings.ENGINE_AI)
+                    }
+                    aiStatus = "✓ اختير: ${best.engine.label} (${best.locale})"
+                } else {
+                    lifecycleScope.launch { settingsRepo.setCommandEngine(AssistantSettings.ENGINE_VOSK) }
+                    aiStatus = "لم ينجح أي محرك بالعربية — سيُستخدم Vosk"
+                }
+                if (wasRunning) VoiceForegroundService.start(this)
+            }
+        }, if (wasRunning) 1200L else 200L)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        probe.cancel()
+    }
 
     private fun currentModelDir(): File {
         val id = if (hasCustomModel && kotlinx.coroutines.runBlocking { settingsRepo.current().modelId } == AssistantSettings.MODEL_CUSTOM) "custom" else "bundled"

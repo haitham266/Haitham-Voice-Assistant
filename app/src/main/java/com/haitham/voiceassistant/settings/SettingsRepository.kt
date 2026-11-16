@@ -33,7 +33,11 @@ data class AssistantSettings(
     /** false = listen for commands directly ("اتصل بأحمد") without saying the wake phrase. */
     val requireWakeWord: Boolean = true,
     /** "ai" = the phone's on-device AI recogniser for commands (Vosk as fallback); "vosk" = Vosk only. */
-    val commandEngine: String = ENGINE_AI
+    val commandEngine: String = ENGINE_AI,
+    /** Which phone recogniser: "system" (on-device default) or a RecognitionService component. Chosen by the live test. */
+    val aiEngine: String = "system",
+    /** Arabic locale accepted by that recogniser (found by the live test). */
+    val aiLocale: String = "ar-SA"
 ) {
     companion object {
         const val DEFAULT_WAKE_PHRASE = "يا مساعد"
@@ -60,6 +64,8 @@ class SettingsRepository(private val context: Context) {
         val confirm = booleanPreferencesKey("confirm_when_unsure")
         val requireWake = booleanPreferencesKey("require_wake_word")
         val engine = stringPreferencesKey("command_engine")
+        val aiEngine = stringPreferencesKey("ai_engine")
+        val aiLocale = stringPreferencesKey("ai_locale")
     }
 
     val settings: Flow<AssistantSettings> = context.dataStore.data.map { p ->
@@ -76,7 +82,9 @@ class SettingsRepository(private val context: Context) {
             wasRunning = p[Keys.wasRunning] ?: false,
             confirmWhenUnsure = p[Keys.confirm] ?: false,
             requireWakeWord = p[Keys.requireWake] ?: true,
-            commandEngine = p[Keys.engine] ?: AssistantSettings.ENGINE_AI
+            commandEngine = p[Keys.engine] ?: AssistantSettings.ENGINE_AI,
+            aiEngine = p[Keys.aiEngine] ?: "system",
+            aiLocale = p[Keys.aiLocale] ?: "ar-SA"
         )
     }
 
@@ -94,5 +102,6 @@ class SettingsRepository(private val context: Context) {
     suspend fun setConfirmWhenUnsure(v: Boolean) = context.dataStore.edit { it[Keys.confirm] = v }
     suspend fun setRequireWakeWord(v: Boolean) = context.dataStore.edit { it[Keys.requireWake] = v }
     suspend fun setCommandEngine(v: String) = context.dataStore.edit { it[Keys.engine] = v }
+    suspend fun setAiEngine(engine: String, locale: String) = context.dataStore.edit { it[Keys.aiEngine] = engine; it[Keys.aiLocale] = locale }
     suspend fun setWasRunning(v: Boolean) = context.dataStore.edit { it[Keys.wasRunning] = v }
 }

@@ -1,5 +1,6 @@
 package com.haitham.voiceassistant.speech
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.media.AudioFormat
@@ -8,6 +9,7 @@ import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.speech.ModelDownloadListener
 import android.speech.RecognitionListener
+import android.speech.RecognitionService
 import android.speech.RecognitionSupport
 import android.speech.RecognitionSupportCallback
 import android.speech.RecognizerIntent
@@ -41,6 +43,34 @@ class OnDeviceRecognizer(private val context: Context) {
         fun isAvailable(context: Context): Boolean =
             Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
 
+        /** Id of the phone's default on-device recogniser (on Samsung: Samsung's own, using its language packs). */
+        const val ENGINE_SYSTEM = "system"
+
+        /** Arabic locales tried in order when an engine says "language not supported". */
+        val localeCandidates = listOf("ar-SA", "ar-AE", "ar-YE", "ar", "ar-EG", "ar-JO")
+
+        data class Engine(val id: String, val label: String)
+
+        /** All speech recognisers installed on the phone (system on-device + every recognition service). */
+        fun listEngines(context: Context): List<Engine> {
+            val out = ArrayList<Engine>()
+            if (isAvailable(context)) out += Engine(ENGINE_SYSTEM, "محرك الهاتف الداخلي (دون إنترنت)")
+            val pm = context.packageManager
+            @Suppress("DEPRECATION")
+            val services = pm.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)
+            for (ri in services) {
+                val si = ri.serviceInfo ?: continue
+                val app = try { pm.getApplicationLabel(si.applicationInfo).toString() } catch (_: Exception) { si.packageName }
+                val label = when {
+                    si.packageName.contains("google") -> "Google – $app"
+                    si.packageName.contains("samsung") -> "Samsung – $app"
+                    else -> app
+                }
+                out += Engine(ComponentName(si.packageName, si.name).flattenToString(), label)
+            }
+            return out
+        }
+
         /** Preferred Arabic locales, Yemeni first. */
         val arabicPreference = listOf("ar-YE", "ar-SA", "ar-AE", "ar-OM", "ar-KW", "ar-QA", "ar-BH", "ar-JO", "ar-EG", "ar-XA", "ar")
 
@@ -71,7 +101,13 @@ class OnDeviceRecognizer(private val context: Context) {
     }
 
     @Volatile var locale: String = "ar-SA"
-        private set
+    /** [ENGINE_SYSTEM] or a flattened ComponentName of a RecognitionService. */
+    @Volatile var engineId: String = ENGINE_SYSTEM
+
+    /** Creates the recogniser for [engine] (main thread). */
+    fun create(engine: String = engineId): SpeechRecognizer =
+        if (engine == ENGINE_SYSTEM) SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        else SpeechRecognizer.createSpeechRecognizer(context, ComponentName.unflattenFromString(engine))
     @Volatile var support: Support = Support.Unknown("لم يُفحص بعد")
         private set
     /** Set to true once the phone refuses EXTRA_AUDIO_SOURCE; then the recogniser uses the mic. */
@@ -189,7 +225,7 @@ class OnDeviceRecognizer(private val context: Context) {
      */
     fun start(streamed: Boolean, biasing: List<String>, cb: Callback): AudioStream? {
         cancel()
-        val r = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        val r = create()
         recognizer = r
         val intent = baseIntent().apply {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)

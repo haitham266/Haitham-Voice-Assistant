@@ -113,10 +113,10 @@ class AssistantController(
                 main.post { contactsRepo.startObserving() }
                 engine = SpeechRecognitionEngine(audio, model!!, supportsGrammar, this).also { it.start() }
                 main.post {
-                    onDevice.checkSupport {
-                        AssistantRepository.aiInfo(it.label)
-                        if (session == null && pending == Pending.NONE) backToWake() // re-pick the listening mode
-                    }
+                    AssistantRepository.aiInfo(
+                        if (settings.commandEngine == AssistantSettings.ENGINE_AI) "المحرك: ${settings.aiEngine.substringAfterLast('.')} • ${settings.aiLocale}"
+                        else "Vosk فقط"
+                    )
                     backToWake()
                 }
             } catch (t: Throwable) {
@@ -148,7 +148,9 @@ class AssistantController(
         }
         if (old.wakePhrase != new.wakePhrase || old.sensitivity != new.sensitivity) {
             worker.execute { rebuildGrammars(); if (pending == Pending.NONE) main.post { backToWake() } }
-        } else if (old.requireWakeWord != new.requireWakeWord || old.commandEngine != new.commandEngine) {
+        } else if (old.requireWakeWord != new.requireWakeWord || old.commandEngine != new.commandEngine ||
+            old.aiEngine != new.aiEngine || old.aiLocale != new.aiLocale) {
+            aiBroken = false
             main.post { if (pending == Pending.NONE && session == null) backToWake() }
         }
     }
@@ -198,9 +200,15 @@ class AssistantController(
     private fun waitingStatus() =
         if (settings.requireWakeWord) AssistantStatus.WAITING_WAKE_WORD else AssistantStatus.WAITING_DIRECT_COMMAND
 
-    private fun aiUsable(): Boolean =
-        settings.commandEngine == AssistantSettings.ENGINE_AI && OnDeviceRecognizer.isAvailable(context) &&
-            onDevice.support !is OnDeviceRecognizer.Support.NoArabic && onDevice.support !is OnDeviceRecognizer.Support.NotAvailable
+    /** Set when the chosen recogniser really refused Arabic during use (not from its language list). */
+    @Volatile private var aiBroken = false
+
+    private fun aiUsable(): Boolean {
+        if (settings.commandEngine != AssistantSettings.ENGINE_AI || aiBroken) return false
+        onDevice.engineId = settings.aiEngine
+        onDevice.locale = settings.aiLocale
+        return if (settings.aiEngine == OnDeviceRecognizer.ENGINE_SYSTEM) OnDeviceRecognizer.isAvailable(context) else true
+    }
 
     private fun biasing(): List<String> =
         contactNames.take(380) + listOf("اتصل ب", "دق على", "كلم", "اتصل بالرقم", "أعد الاتصال", "أوقف الاستماع", "افتح التطبيق")
@@ -234,6 +242,11 @@ class AssistantController(
         override fun onResults(hyps: List<Hypothesis>) = main.post { s.aiHyps = hyps; tryFinish(s) }.let {}
         override fun onError(code: Int, audioSourceRefused: Boolean) = main.post {
             Log.w(tag, "AI recogniser error $code (refused=$audioSourceRefused)")
+            if (code == android.speech.SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                code == android.speech.SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE) {
+                aiBroken = true
+                AssistantRepository.aiInfo("المحرك المختار رفض العربية (${settings.aiLocale}) — اضغط «فحص بصوتي» في الإعدادات")
+            }
             s.aiFailed = true; tryFinish(s)
         }.let {}
     }

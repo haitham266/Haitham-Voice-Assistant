@@ -62,6 +62,7 @@ data class SettingsActions(
     val setRequireWakeWord: (Boolean) -> Unit,
     val setCommandEngine: (String) -> Unit,
     val checkAi: () -> Unit,
+    val selectEngine: (com.haitham.voiceassistant.speech.EngineProbe.Outcome) -> Unit,
     val downloadArabic: () -> Unit,
     val setTimeout: (Int) -> Unit,
     val setModel: (String) -> Unit,
@@ -80,6 +81,7 @@ fun SettingsScreen(
     state: AssistantUiState,
     hasCustomModel: Boolean,
     aiStatus: String,
+    probeResults: List<com.haitham.voiceassistant.speech.EngineProbe.Outcome> = emptyList(),
     importStatus: String,
     refreshKey: Int,
     actions: SettingsActions,
@@ -143,15 +145,28 @@ fun SettingsScreen(
                 Text("Vosk فقط (النموذج المضمّن)")
             }
             Hint("الحالة: ${aiStatus.ifBlank { "لم يُفحص بعد" }}")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = actions.checkAi) { Text("فحص") }
-                Button(onClick = actions.downloadArabic) { Text("تنزيل العربية") }
-            }
+            Button(onClick = actions.checkAi) { Text("فحص بصوتي (يجرّب كل محركات الهاتف)") }
             Hint(
-                "يعمل داخل الهاتف دون إنترنت بعد تنزيل حزمة العربية مرة واحدة. إن لم ينجح زر التنزيل: " +
-                    "تطبيق Google ← الإعدادات ← الصوت ← التعرف على الكلام بلا اتصال ← العربية. " +
-                    "إن لم يتوفر المحرك يستخدم التطبيق Vosk تلقائياً."
+                "اضغط ثم تكلم عندما يُطلب منك، مرة لكل محرك (مثلاً «اتصل بعمنا مختار»). يجرّب التطبيق كل لهجة عربية تلقائياً، " +
+                    "ثم يختار أفضل محرك نجح. للتأكد أنه يعمل دون إنترنت: فعّل وضع الطيران قبل الفحص."
             )
+            probeResults.forEach { o ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(
+                        selected = o.ok && settings.aiEngine == o.engine.id && settings.aiLocale == o.locale,
+                        onClick = { if (o.ok) actions.selectEngine(o) }, enabled = o.ok
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(o.engine.label, style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            if (o.ok) "✓ فهم: «${o.text}» (${o.locale})" else "✗ ${o.error}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (o.ok) Listening else Danger
+                        )
+                    }
+                }
+            }
+            OutlinedButton(onClick = actions.downloadArabic) { Text("طلب تنزيل العربية من النظام") }
         }
 
         Section("كلمة التنبيه") {
