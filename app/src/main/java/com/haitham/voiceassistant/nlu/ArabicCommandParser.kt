@@ -134,6 +134,11 @@ class ArabicCommandParser(wakePhrase: String = "يا مساعد") {
     private fun findCallVerb(tokens: List<String>): Int {
         // The verb is expected near the start (after wake/politeness words).
         for (i in 0 until minOf(tokens.size, 3)) if (tokens[i] in callVerbs && tokens[i] != "شغل") return i
+        // Recogniser spellings of "اتصل": بتصل / يتصل / التصل / تتصل / اتصلو ...
+        for (i in 0 until minOf(tokens.size, 3)) {
+            val t = tokens[i]
+            if (t.length in 3..7 && t.contains("تصل") && !t.startsWith("وتصل")) return i
+        }
         return -1
     }
 

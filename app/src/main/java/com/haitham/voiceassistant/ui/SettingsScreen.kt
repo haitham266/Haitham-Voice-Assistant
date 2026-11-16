@@ -137,8 +137,12 @@ fun SettingsScreen(
 
         Section("محرك فهم الأوامر") {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(settings.commandEngine == AssistantSettings.ENGINE_WHISPER, { actions.setCommandEngine(AssistantSettings.ENGINE_WHISPER) })
+                Text("Whisper Turbo داخل التطبيق (مستحسن – يفهم اللهجة اليمنية، دون إنترنت)")
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(settings.commandEngine == AssistantSettings.ENGINE_AI, { actions.setCommandEngine(AssistantSettings.ENGINE_AI) })
-                Text("الذكاء الاصطناعي في الهاتف (مستحسن – أدق وأسرع ويفهم اللهجات)")
+                Text("محرك الهاتف (سامسونج/جوجل) – يحتاج «فحص بصوتي»")
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RadioButton(settings.commandEngine == AssistantSettings.ENGINE_VOSK, { actions.setCommandEngine(AssistantSettings.ENGINE_VOSK) })

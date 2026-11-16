@@ -214,6 +214,30 @@ class ContactMatcherTest {
         assertEquals("خالي مختار", familyCall("دق لخالي مختار لو سمحت"))
     }
 
+    /**
+     * Exact Whisper Turbo outputs on the user's own voice (screen recordings from the
+     * Galaxy S22 Ultra), resolved against a phone book like the user's.
+     */
+    @Test fun whisperOnUsersRealVoice() {
+        val book = listOf(
+            c("عمنا مختار", "+967 772 408 936"), c("مختار سالم", "771000002"), c("عرفات العليمي", "771000010"),
+            c("هيثم العريفي", "771000011"), c("ام الغالية", "771000012"), c("عمنا مطيع", "771000013"),
+            c("جميل التهامي", "715101199"), c("خالي مختار", "771000006")
+        )
+        val r = CommandResolver(ArabicCommandParser(), ContactMatcher(minScore = 0.55).apply { setContacts(book) })
+        fun call(t: String) = (r.resolveCommand(listOf(hyp(t))) as? Decision.CallCandidate)?.candidate?.contact?.displayName
+        assertEquals("عمنا مختار", call("يمشاعد اتصل بعمنا مختار"))
+        assertEquals("عرفات العليمي", call("يا مساعد اتصل بعرفات العليمي"))
+        assertEquals("هيثم العريفي", call("يا مساعد اتصل بحيثم العريفين"))
+        assertEquals("ام الغالية", call("اتصل بأم الغالية"))
+        assertEquals("عمنا مطيع", call("يا مساعد اتصل بعما نوطيع"))
+        assertEquals("عمنا مختار", call("يا مساعد بتصل بعما لا مختار"))
+        // Whisper "hallucinations" on silence/noise must never call anyone
+        for (noise in listOf("شكرا", "ترجمة نانسي", "اشتركوا في الق", "تمال إلغاء", "المراح")) {
+            assertFalse(noise, r.resolveCommand(listOf(hyp(noise))) is Decision.CallCandidate)
+        }
+    }
+
     @Test fun vadGatesSilence() {
         val vad = EnergyVad(1)
         repeat(30) { assertFalse(vad.update(80.0)) } // quiet room

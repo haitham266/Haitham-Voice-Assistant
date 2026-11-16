@@ -8,6 +8,7 @@ captures/
 .cxx/
 # Large binaries: the model zip is downloaded/verified by Gradle (see app/build.gradle.kts)
 models/*.zip
+models/*.tar.bz2
 models/*/
 # Signing secrets are never committed
 keystore.properties

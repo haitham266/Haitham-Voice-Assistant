@@ -32,8 +32,8 @@ data class AssistantSettings(
     val confirmWhenUnsure: Boolean = false,
     /** false = listen for commands directly ("اتصل بأحمد") without saying the wake phrase. */
     val requireWakeWord: Boolean = true,
-    /** "ai" = the phone's on-device AI recogniser for commands (Vosk as fallback); "vosk" = Vosk only. */
-    val commandEngine: String = ENGINE_AI,
+    /** "whisper" = Whisper Turbo inside the app (default); "ai" = the phone's recogniser; "vosk" = Vosk only. */
+    val commandEngine: String = ENGINE_WHISPER,
     /** Which phone recogniser: "system" (on-device default) or a RecognitionService component. Chosen by the live test. */
     val aiEngine: String = "system",
     /** Arabic locale accepted by that recogniser (found by the live test). */
@@ -44,6 +44,7 @@ data class AssistantSettings(
         const val MODEL_BUNDLED = "bundled"
         const val MODEL_CUSTOM = "custom"
         const val ENGINE_AI = "ai"
+        const val ENGINE_WHISPER = "whisper"
         const val ENGINE_VOSK = "vosk"
     }
 }
@@ -82,7 +83,7 @@ class SettingsRepository(private val context: Context) {
             wasRunning = p[Keys.wasRunning] ?: false,
             confirmWhenUnsure = p[Keys.confirm] ?: false,
             requireWakeWord = p[Keys.requireWake] ?: true,
-            commandEngine = p[Keys.engine] ?: AssistantSettings.ENGINE_AI,
+            commandEngine = p[Keys.engine] ?: AssistantSettings.ENGINE_WHISPER,
             aiEngine = p[Keys.aiEngine] ?: "system",
             aiLocale = p[Keys.aiLocale] ?: "ar-SA"
         )

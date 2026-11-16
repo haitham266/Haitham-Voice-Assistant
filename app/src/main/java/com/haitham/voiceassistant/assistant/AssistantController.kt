@@ -23,6 +23,7 @@ import com.haitham.voiceassistant.settings.SettingsRepository
 import com.haitham.voiceassistant.speech.GrammarBuilder
 import com.haitham.voiceassistant.speech.ModelManager
 import com.haitham.voiceassistant.speech.OnDeviceRecognizer
+import com.haitham.voiceassistant.speech.WhisperRecognizer
 import com.haitham.voiceassistant.speech.SpeechRecognitionEngine
 import com.haitham.voiceassistant.speech.SpeechRecognitionEngine.Purpose
 import com.haitham.voiceassistant.speech.Vocabulary
@@ -73,10 +74,25 @@ class AssistantController(
     /** The phone's on-device AI recogniser (used for the command itself). */
     private val onDevice = OnDeviceRecognizer(context)
 
+    /** Whisper Turbo inside the app: the default engine for understanding commands. */
+    private val whisper = WhisperRecognizer(context)
+
+    private fun whisperUsable() = settings.commandEngine == AssistantSettings.ENGINE_WHISPER && whisper.isLoaded
+
+    /** Loads Whisper on the worker thread if it is the selected engine. */
+    private fun ensureWhisperLoaded() {
+        if (settings.commandEngine != AssistantSettings.ENGINE_WHISPER || whisper.isLoaded) return
+        if (!WhisperRecognizer.isBundled(context)) { AssistantRepository.aiInfo("Whisper غير موجود في هذه النسخة"); return }
+        onStatus(AssistantStatus.LOADING_MODEL, "تحميل Whisper (الذكاء الاصطناعي)…")
+        val ok = whisper.load()
+        AssistantRepository.aiInfo(if (ok) "Whisper Turbo ✓ يعمل داخل الهاتف دون إنترنت" else "تعذر تحميل Whisper — سيُستخدم Vosk")
+    }
+
     /** One command round: results of the AI recogniser and of Vosk, merged when both are in. */
     private class Session(val purpose: Purpose) {
         var ai = false          // AI recogniser running for this round
         var micMode = false     // AI recogniser uses the mic itself (Vosk not running)
+        var whisper = false     // the AI part is Whisper (slower to finish than the phone's engine)
         var aiHyps: List<Hypothesis>? = null
         var aiFailed = false
         var voskHyps: List<Hypothesis>? = null
@@ -109,14 +125,16 @@ class AssistantController(
                 Log.i(tag, "Model loaded in ${SystemClock.elapsedRealtime() - t0} ms")
                 if (released) return@execute
                 rebuildGrammars()
+                ensureWhisperLoaded()
                 contactsRepo.onChanged = { worker.execute { rebuildCommandGrammar() } }
                 main.post { contactsRepo.startObserving() }
                 engine = SpeechRecognitionEngine(audio, model!!, supportsGrammar, this).also { it.start() }
                 main.post {
-                    AssistantRepository.aiInfo(
-                        if (settings.commandEngine == AssistantSettings.ENGINE_AI) "المحرك: ${settings.aiEngine.substringAfterLast('.')} • ${settings.aiLocale}"
-                        else "Vosk فقط"
-                    )
+                    when (settings.commandEngine) {
+                        AssistantSettings.ENGINE_AI -> AssistantRepository.aiInfo("محرك الهاتف: ${settings.aiEngine.substringAfterLast('.')} • ${settings.aiLocale}")
+                        AssistantSettings.ENGINE_VOSK -> AssistantRepository.aiInfo("Vosk فقط")
+                        else -> Unit
+                    }
                     backToWake()
                 }
             } catch (t: Throwable) {
@@ -133,6 +151,7 @@ class AssistantController(
         worker.execute {
             engine?.stop(); engine = null
             model?.close(); model = null
+            whisper.release()
         }
         worker.shutdown()
         main.post { onDevice.shutdown() }
@@ -151,6 +170,10 @@ class AssistantController(
         } else if (old.requireWakeWord != new.requireWakeWord || old.commandEngine != new.commandEngine ||
             old.aiEngine != new.aiEngine || old.aiLocale != new.aiLocale) {
             aiBroken = false
+            if (new.commandEngine == AssistantSettings.ENGINE_WHISPER && !whisper.isLoaded) {
+                worker.execute { ensureWhisperLoaded(); main.post { if (pending == Pending.NONE && session == null) backToWake() } }
+                return
+            }
             main.post { if (pending == Pending.NONE && session == null) backToWake() }
         }
     }
@@ -192,7 +215,8 @@ class AssistantController(
             triggerGrammar, triggerDetector, settings.sensitivity,
             // With the AI recogniser every utterance is checked by it (much more accurate than
             // spotting "اتصل" with Vosk); without it, Vosk spots the call words.
-            triggerOnSpeech = aiUsable() && !onDevice.audioSourceUnsupported && android.os.Build.VERSION.SDK_INT >= 33
+            triggerOnSpeech = whisperUsable() ||
+                (aiUsable() && !onDevice.audioSourceUnsupported && android.os.Build.VERSION.SDK_INT >= 33)
         )
         onStatus(waitingStatus(), null)
     }
@@ -222,6 +246,13 @@ class AssistantController(
         val s = Session(purpose)
         session = s
         val timeout = if (purpose == Purpose.TEST) 6000L else settings.commandTimeoutSec * 1000L
+        if (whisperUsable()) {
+            // Whisper gets the whole command (including what was said before the hand-off).
+            s.ai = true; s.whisper = true
+            val sink = whisper.Session { hyps, _ -> main.post { s.aiHyps = hyps; tryFinish(s) } }
+            e.listen(purpose, commandGrammar, useFree = false, timeoutMs = timeout, replay = replay, muteMs = muteMs, sink = sink)
+            return
+        }
         val useAi = aiUsable()
         if (useAi && !onDevice.audioSourceUnsupported && android.os.Build.VERSION.SDK_INT >= 33) {
             s.ai = true
@@ -272,7 +303,9 @@ class AssistantController(
         if (s.purpose == Purpose.TEST) {
             val lines = (ai + vosk).map {
                 val src = when (it.source) {
-                    Hypothesis.Source.ON_DEVICE -> "ذكاء الهاتف"; Hypothesis.Source.GRAMMAR -> "Vosk مقيد"; else -> "Vosk حر"
+                    Hypothesis.Source.ON_DEVICE -> if (s.whisper) "Whisper" else "محرك الهاتف"
+                    Hypothesis.Source.GRAMMAR -> "Vosk مقيد"
+                    else -> "Vosk حر"
                 }
                 "[$src] ${it.text} → ${resolver.resolveCommand(listOf(it))}"
             }
@@ -329,7 +362,7 @@ class AssistantController(
             if (s.ai && s.aiHyps == null && !s.aiFailed) {
                 onStatus(AssistantStatus.PROCESSING, null)
                 // Speech ended (stream closed): give the AI recogniser a moment to finalise.
-                main.postDelayed({ if (!s.done && s.aiHyps == null) { onDevice.cancel(); s.aiFailed = true; tryFinish(s) } }, 2500)
+                main.postDelayed({ if (!s.done && s.aiHyps == null) { onDevice.cancel(); s.aiFailed = true; tryFinish(s) } }, if (s.whisper) 12000 else 2500)
             }
             tryFinish(s)
             return@post
