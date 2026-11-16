@@ -247,6 +247,10 @@ fun SettingsScreen(
             if (analyzeOut.isNotBlank()) Hint(analyzeOut)
         }
 
+        Section("حول التطبيق") {
+            CreditsFooter()
+        }
+
         Section("الخصوصية") {
             Hint(
                 "• التطبيق لا يملك صلاحية الإنترنت إطلاقاً، فلا يمكنه إرسال أي شيء.\n" +

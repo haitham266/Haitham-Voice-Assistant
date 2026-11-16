@@ -144,7 +144,9 @@ fun MainScreen(
             Spacer(Modifier.height(10.dp))
             Text("النموذج: ${state.modelInfo}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         }
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(16.dp))
+        CreditsFooter()
+        Spacer(Modifier.height(16.dp))
     }
 }
 
