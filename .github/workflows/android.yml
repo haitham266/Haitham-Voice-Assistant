@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: ["**"]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -19,10 +19,12 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-
+      # GitHub's Ubuntu runners already contain the Android SDK ($ANDROID_HOME).
       - name: Install SDK packages
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Cache Vosk model
         uses: actions/cache@v4
@@ -61,10 +63,10 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: Haitham Voice Assistant (build ${{ github.run_number }})
+          tag_name: v1.${{ github.run_number }}
+          name: Haitham Voice Assistant — إصدار ${{ github.run_number }}
           body: |
             نسخة مبنية تلقائياً من الفرع ${{ github.ref_name }}.
             ثبّت HaithamVoiceAssistant-release.apk على الهاتف. راجع README للتعليمات.
           files: dist/*.apk
-          prerelease: true
+          make_latest: true
