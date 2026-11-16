@@ -80,6 +80,28 @@ class ContactsRepository(private val context: Context) {
                 }
             }
         }
-        return byId.map { (id, phones) -> Contact(id, names[id].orEmpty(), phones, starred[id] ?: false) }
+        val calls = callCounts()
+        return byId.map { (id, phones) ->
+            val count = phones.sumOf { calls[ContactMatcher.phoneKey(it.number)] ?: 0 }
+            Contact(id, names[id].orEmpty(), phones, starred[id] ?: false, count)
+        }
+    }
+
+    /** Outgoing call counts per number (last 9 digits), only if READ_CALL_LOG was granted. */
+    private fun callCounts(): Map<String, Int> {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) return emptyMap()
+        val out = HashMap<String, Int>()
+        try {
+            context.contentResolver.query(
+                android.provider.CallLog.Calls.CONTENT_URI, arrayOf(android.provider.CallLog.Calls.NUMBER),
+                "${android.provider.CallLog.Calls.TYPE} = ?", arrayOf(android.provider.CallLog.Calls.OUTGOING_TYPE.toString()), null
+            )?.use { c ->
+                while (c.moveToNext()) {
+                    val k = ContactMatcher.phoneKey(c.getString(0).orEmpty())
+                    if (k.isNotEmpty()) out[k] = (out[k] ?: 0) + 1
+                }
+            }
+        } catch (_: Exception) { }
+        return out
     }
 }

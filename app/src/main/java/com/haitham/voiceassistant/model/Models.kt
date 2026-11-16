@@ -30,7 +30,9 @@ data class Contact(
     val id: Long,
     val displayName: String,
     val phones: List<PhoneEntry>,
-    val starred: Boolean = false
+    val starred: Boolean = false,
+    /** How many times this contact was called (from the call log, if permitted). Used only to break exact ties. */
+    val callCount: Int = 0
 )
 
 /** Parsed user intention. */

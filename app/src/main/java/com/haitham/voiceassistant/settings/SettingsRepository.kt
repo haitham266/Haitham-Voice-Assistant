@@ -27,7 +27,9 @@ data class AssistantSettings(
     val modelId: String = MODEL_BUNDLED,
     val commandTimeoutSec: Int = 7,
     val lastDialedNumber: String = "",
-    val wasRunning: Boolean = false
+    val wasRunning: Boolean = false,
+    /** Off by default: call the best match immediately, like Siri. */
+    val confirmWhenUnsure: Boolean = false
 ) {
     companion object {
         const val DEFAULT_WAKE_PHRASE = "يا مساعد"
@@ -49,6 +51,7 @@ class SettingsRepository(private val context: Context) {
         val timeout = intPreferencesKey("command_timeout")
         val lastNumber = stringPreferencesKey("last_dialed")
         val wasRunning = booleanPreferencesKey("was_running")
+        val confirm = booleanPreferencesKey("confirm_when_unsure")
     }
 
     val settings: Flow<AssistantSettings> = context.dataStore.data.map { p ->
@@ -62,7 +65,8 @@ class SettingsRepository(private val context: Context) {
             modelId = p[Keys.model] ?: AssistantSettings.MODEL_BUNDLED,
             commandTimeoutSec = p[Keys.timeout] ?: 7,
             lastDialedNumber = p[Keys.lastNumber] ?: "",
-            wasRunning = p[Keys.wasRunning] ?: false
+            wasRunning = p[Keys.wasRunning] ?: false,
+            confirmWhenUnsure = p[Keys.confirm] ?: false
         )
     }
 
@@ -77,5 +81,6 @@ class SettingsRepository(private val context: Context) {
     suspend fun setModel(v: String) = context.dataStore.edit { it[Keys.model] = v }
     suspend fun setCommandTimeout(v: Int) = context.dataStore.edit { it[Keys.timeout] = v.coerceIn(4, 15) }
     suspend fun setLastDialed(v: String) = context.dataStore.edit { it[Keys.lastNumber] = v }
+    suspend fun setConfirmWhenUnsure(v: Boolean) = context.dataStore.edit { it[Keys.confirm] = v }
     suspend fun setWasRunning(v: Boolean) = context.dataStore.edit { it[Keys.wasRunning] = v }
 }

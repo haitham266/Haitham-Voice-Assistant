@@ -52,7 +52,7 @@ class AssistantController(
     private val contactsRepo = ContactsRepository(context)
     private val callManager = CallManager(context)
     private val feedback = FeedbackPlayer(context)
-    private val matcher = ContactMatcher()
+    private val matcher = ContactMatcher(minScore = 0.55)
     private val dedup = CommandDeduplicator()
 
     private var settings = AssistantSettings()
@@ -118,6 +118,9 @@ class AssistantController(
     fun applySettings(new: AssistantSettings) {
         val old = settings
         settings = new
+        if (old.confirmWhenUnsure != new.confirmWhenUnsure) {
+            resolver = CommandResolver(parser, matcher, askWhenUnsure = new.confirmWhenUnsure)
+        }
         if (old.wakePhrase != new.wakePhrase || old.sensitivity != new.sensitivity) {
             worker.execute { rebuildGrammars(); if (pending == Pending.NONE) main.post { backToWake() } }
         }
@@ -126,7 +129,7 @@ class AssistantController(
     private fun rebuildGrammars() {
         val v = vocab ?: return
         parser = ArabicCommandParser(settings.wakePhrase)
-        resolver = CommandResolver(parser, matcher)
+        resolver = CommandResolver(parser, matcher, askWhenUnsure = settings.confirmWhenUnsure)
         wakeDetector = WakeWordDetector(settings.wakePhrase, settings.sensitivity)
         if (supportsGrammar) {
             val wg = GrammarBuilder.wakeGrammar(settings.wakePhrase, v)
@@ -174,7 +177,11 @@ class AssistantController(
         Log.i(tag, "wake (conf=$confidence, trailing=$trailingSpeech)")
         AssistantRepository.heard("…")
         val beep = feedback.readyBeep()
-        engine?.listen(Purpose.COMMAND, commandGrammar, settings.dualRecognition, settings.commandTimeoutSec * 1000L, replay = trailingSpeech, muteMs = beep)
+        // If the user is already saying the command (same breath), never drop audio for the beep.
+        engine?.listen(
+            Purpose.COMMAND, commandGrammar, settings.dualRecognition, settings.commandTimeoutSec * 1000L,
+            replay = trailingSpeech, muteMs = if (trailingSpeech) 0 else beep
+        )
         onStatus(AssistantStatus.LISTENING_COMMAND, null)
     }.let {}
 

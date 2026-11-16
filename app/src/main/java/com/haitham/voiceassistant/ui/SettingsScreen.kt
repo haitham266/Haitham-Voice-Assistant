@@ -58,6 +58,7 @@ data class SettingsActions(
     val setVoiceFeedback: (Boolean) -> Unit,
     val setKeepCpu: (Boolean) -> Unit,
     val setDual: (Boolean) -> Unit,
+    val setConfirm: (Boolean) -> Unit,
     val setTimeout: (Int) -> Unit,
     val setModel: (String) -> Unit,
     val importModel: (Uri) -> Unit,
@@ -136,6 +137,8 @@ fun SettingsScreen(
         }
 
         Section("التعرف على الأوامر") {
+            SwitchRow("طلب التأكيد عند الشك في الاسم أو الرقم", settings.confirmWhenUnsure, actions.setConfirm)
+            Hint("مطفأ (الافتراضي): يتصل فوراً بأقرب اسم مثل سيري. يسأل فقط إذا وُجد شخصان باسم متطابق ولا توجد جهة مفضّلة أو أكثر اتصالاً بينهما.")
             SwitchRow("الرد الصوتي (محرك النطق في الهاتف دون إنترنت)", settings.voiceFeedback, actions.setVoiceFeedback)
             SwitchRow("تعرف مزدوج (قواعد + تعرف حر) – أدق وأكثر استهلاكاً", settings.dualRecognition, actions.setDual)
             Text("أقصى مدة لاستقبال الأمر: ${settings.commandTimeoutSec} ثوانٍ", style = MaterialTheme.typography.bodyLarge)

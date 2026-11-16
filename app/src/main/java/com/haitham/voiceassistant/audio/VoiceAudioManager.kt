@@ -124,9 +124,14 @@ class EnergyVad(sensitivity: Int) {
     var isSpeech = false
         private set
 
+    /** Loudness of the last frame without the hangover (used to end commands quickly). */
+    var lastFrameLoud = false
+        private set
+
     /** Feeds a frame energy; returns true if this frame should be passed to the recogniser. */
     fun update(energy: Double): Boolean {
         val loud = energy > absoluteMin && energy > noise * factor
+        lastFrameLoud = loud
         if (loud) {
             isSpeech = true
             hangover = hangoverFrames

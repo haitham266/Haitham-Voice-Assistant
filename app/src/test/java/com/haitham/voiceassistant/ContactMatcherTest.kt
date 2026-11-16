@@ -34,7 +34,8 @@ class ContactMatcherTest {
         c("Haitham Office", "01234567")
     )
     private val matcher = ContactMatcher().apply { setContacts(book) }
-    private val resolver = CommandResolver(ArabicCommandParser(), matcher)
+    private val resolver = CommandResolver(ArabicCommandParser(), matcher)           // default: decisive (no questions)
+    private val cautious = CommandResolver(ArabicCommandParser(), matcher, askWhenUnsure = true)
 
     private fun hyp(text: String, conf: Float = 0.95f) =
         Hypothesis(text, text.split(' ').map { RecognizedWord(it, conf, 0f, 0f) }, Hypothesis.Source.GRAMMAR)
@@ -59,10 +60,13 @@ class ContactMatcherTest {
         assertEquals(2, (d as Decision.AskChoice).candidates.size)
     }
 
-    @Test fun haithamAndHaithamOfficeIsAmbiguous() {
-        // "هيثم" alone matches the Arabic contact and the Latin "Haitham Office" -> must ask
+    @Test fun haithamAndHaithamOfficeIsAmbiguousInCautiousMode() {
+        // "هيثم" alone matches the Arabic contact and the Latin "Haitham Office"
+        assertTrue(cautious.resolveCommand(listOf(hyp("اتصل بهيثم"))) is Decision.AskChoice)
+        // decisive mode calls the closer (Arabic) one immediately
         val d = decide("اتصل بهيثم")
-        assertTrue("$d", d is Decision.AskChoice)
+        assertTrue("$d", d is Decision.CallCandidate)
+        assertEquals("777123456", (d as Decision.CallCandidate).candidate.phone.number)
     }
 
     @Test fun similarButDifferentSurnameDoesNotCallBlindly() {
@@ -72,9 +76,10 @@ class ContactMatcherTest {
         assertEquals("711222333", (d as Decision.CallCandidate).candidate.phone.number)
     }
 
-    @Test fun wrongSurnameIsNotConfident() {
-        val d = decide("اتصل بهيثم الحربي")
-        assertFalse("must not call directly: $d", d is Decision.CallCandidate)
+    @Test fun wrongSurname() {
+        // cautious mode asks; decisive mode calls the closest name
+        assertFalse(cautious.resolveCommand(listOf(hyp("اتصل بهيثم الحربي"))) is Decision.CallCandidate)
+        assertTrue(decide("اتصل بهيثم الحربي") is Decision.CallCandidate)
     }
 
     @Test fun joinedSpelling() {
@@ -99,8 +104,9 @@ class ContactMatcherTest {
 
     @Test fun numbers() {
         assertEquals(Decision.CallDigits("777123456"), decide("اتصل بالرقم سبعة سبعة سبعة واحد اثنين ثلاثة أربعة خمسة ستة"))
-        // low recogniser confidence -> read the number back and ask
-        assertEquals(Decision.ConfirmDigits("777"), resolver.resolveCommand(listOf(hyp("اتصل بالرقم سبعة سبعة سبعة", 0.4f))))
+        // low recogniser confidence: decisive mode still dials, cautious mode reads it back
+        assertEquals(Decision.CallDigits("777"), resolver.resolveCommand(listOf(hyp("اتصل بالرقم سبعة سبعة سبعة", 0.4f))))
+        assertEquals(Decision.ConfirmDigits("777"), cautious.resolveCommand(listOf(hyp("اتصل بالرقم سبعة سبعة سبعة", 0.4f))))
     }
 
     @Test fun gibberish() {
@@ -120,6 +126,43 @@ class ContactMatcherTest {
         val byName = resolver.resolveChoice(listOf(hyp("محمد صالح")), d.candidates)
         assertEquals("711999888", (byName as Decision.CallCandidate).candidate.phone.number)
         assertEquals(Decision.Cancelled, resolver.resolveChoice(listOf(hyp("إلغاء")), d.candidates))
+    }
+
+    /** Real case recorded on the user's phone: contact "عمنا مختار", heard "اتصل بعي لمنى مختار". */
+    private val family = listOf(
+        c("عمنا مختار", "+967 772 408 936"), c("مختار علي", "771000001"), c("مختار سالم", "771000002"),
+        c("ابو مختار", "771000003"), c("مختار", "771000004"), c("عمنا محمد", "771000005"), c("خالي مختار", "771000006")
+    )
+    private val familyResolver = CommandResolver(ArabicCommandParser(), ContactMatcher(minScore = 0.55).apply { setContacts(family) })
+
+    private fun familyCall(text: String): String? =
+        (familyResolver.resolveCommand(listOf(hyp(text))) as? Decision.CallCandidate)?.candidate?.contact?.displayName
+
+    @Test fun kinshipNamesCallDirectly() {
+        assertEquals("عمنا مختار", familyCall("اتصل بعي لمنى مختار"))   // exactly what the phone heard
+        assertEquals("عمنا مختار", familyCall("اتصل بعمنا مختار"))
+        assertEquals("عمنا مختار", familyCall("اتصل ب عمنا مختار"))
+        assertEquals("عمنا مختار", familyCall("يا مساعد دق على عمنا مختار"))
+        assertEquals("خالي مختار", familyCall("اتصل بخالي مختار"))
+        assertEquals("مختار سالم", familyCall("كلم مختار سالم"))
+        assertEquals("مختار", familyCall("اتصل بمختار"))
+        assertEquals("عمنا محمد", familyCall("اتصل بعمنا محمد"))
+    }
+
+    @Test fun exactTieUsesStarredThenAsks() {
+        val twins = listOf(
+            Contact(100, "محمد", listOf(PhoneEntry("770000001", 2, null, false)), starred = false),
+            Contact(101, "محمد", listOf(PhoneEntry("770000002", 2, null, false)), starred = true)
+        )
+        val r = CommandResolver(ArabicCommandParser(), ContactMatcher().apply { setContacts(twins) })
+        val d = r.resolveCommand(listOf(hyp("اتصل بمحمد")))
+        assertEquals("770000002", (d as Decision.CallCandidate).candidate.phone.number)
+        val busy = listOf(twins[0].copy(callCount = 9), twins[1].copy(starred = false, callCount = 2))
+        val r2 = CommandResolver(ArabicCommandParser(), ContactMatcher().apply { setContacts(busy) })
+        assertEquals("770000001", ((r2.resolveCommand(listOf(hyp("اتصل بمحمد")))) as Decision.CallCandidate).candidate.phone.number)
+        val plain = listOf(twins[0], twins[1].copy(starred = false))
+        val r3 = CommandResolver(ArabicCommandParser(), ContactMatcher().apply { setContacts(plain) })
+        assertTrue(r3.resolveCommand(listOf(hyp("اتصل بمحمد"))) is Decision.AskChoice) // truly identical: only case that asks
     }
 
     @Test fun dedupSuppressesRepeat() {

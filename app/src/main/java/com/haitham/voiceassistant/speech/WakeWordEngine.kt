@@ -25,6 +25,7 @@ class WakeWordEngine(model: Model, grammarJson: String?, private val detector: W
     private var utterLen = 0
     private val preRoll = ArrayDeque<ShortArray>()
     private var inUtterance = false
+    private var partialHits = 0
 
     /**
      * @param speech whether the VAD considers this frame part of speech.
@@ -34,6 +35,7 @@ class WakeWordEngine(model: Model, grammarJson: String?, private val detector: W
         if (!speech) {
             if (inUtterance) {
                 inUtterance = false
+                partialHits = 0
                 val r = evaluate(rec.finalResult)
                 rec.reset()
                 if (r != null) return r
@@ -50,8 +52,19 @@ class WakeWordEngine(model: Model, grammarJson: String?, private val detector: W
         }
         append(buf, n)
         if (rec.acceptWaveForm(buf, n)) {
+            partialHits = 0
             val r = evaluate(rec.result)
             if (r != null) { rec.reset(); inUtterance = false; return r }
+        } else {
+            // Instant trigger: the wake phrase is in the running hypothesis for two
+            // consecutive frames (~200 ms) -> wake now, without waiting for silence.
+            val partial = org.json.JSONObject(rec.partialResult).optString("partial")
+            partialHits = if (partial.isNotBlank() && detector.matchesPartial(partial)) partialHits + 1 else 0
+            if (partialHits >= 2) {
+                partialHits = 0
+                rec.reset(); inUtterance = false
+                return Result(1f, trailingSpeech = true) // keep the audio: the command may already be spoken
+            }
         }
         return null
     }

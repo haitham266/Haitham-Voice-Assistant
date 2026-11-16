@@ -221,9 +221,9 @@ class SpeechRecognitionEngine(
 
     private fun listenFrame(buf: ShortArray, n: Int, energy: Double, now: Long) {
         if (now < muteUntil) return // skip the beep we just played
-        val speech = vad.update(energy)
+        vad.update(energy)
         feedListen(buf, n)
-        if (speech) { listenSpeechSeen = true; listenSilenceFrames = 0 } else listenSilenceFrames++
+        if (vad.lastFrameLoud) { listenSpeechSeen = true; listenSilenceFrames = 0 } else listenSilenceFrames++
 
         if (now - lastPartialAt > 400) {
             lastPartialAt = now
@@ -235,7 +235,7 @@ class SpeechRecognitionEngine(
             }
         }
         val elapsed = now - listenStart
-        val endOfSpeech = listenSpeechSeen && listenSilenceFrames >= 9 // 0.9 s of silence after speech
+        val endOfSpeech = listenSpeechSeen && listenSilenceFrames >= 7 // 0.7 s of real silence after speech
         val nothingSaid = !listenSpeechSeen && elapsed > 4500
         if (endOfSpeech || nothingSaid || elapsed > listenTimeout) finishListen()
     }

@@ -145,7 +145,7 @@ class ArabicCommandParser(wakePhrase: String = "يا مساعد") {
         val out = LinkedHashSet<String>()
         out += nameTokens.joinToString(" ")
         val first = nameTokens.firstOrNull() ?: return out.toList()
-        if ((first.startsWith("ب") || first.startsWith("ل")) && first.length >= 4) {
+        if ((first.startsWith("ب") || first.startsWith("ل")) && first.length >= 3) {
             out += (listOf(first.substring(1)) + nameTokens.drop(1)).joinToString(" ")
         }
         if (first.startsWith("بال") && first.length >= 5) {

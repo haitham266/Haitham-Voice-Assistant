@@ -25,6 +25,18 @@ class WakeWordDetector(wakePhrase: String, sensitivity: Int) {
 
     data class Hit(val endTime: Float, val confidence: Float)
 
+    /**
+     * Instant detection on a *partial* (still-being-spoken) hypothesis: true if the
+     * wake phrase appears in it. The engine requires it in two consecutive partials.
+     */
+    fun matchesPartial(text: String): Boolean {
+        val t = ArabicNormalizer.tokens(text)
+        val k = wakeTokens.size
+        if (k == 0 || t.size < k) return allowLastWordOnly && t.contains(wakeTokens.lastOrNull())
+        for (i in 0..t.size - k) if ((0 until k).all { t[i + it] == wakeTokens[it] }) return true
+        return allowLastWordOnly && t.contains(wakeTokens.last())
+    }
+
     fun detect(words: List<RecognizedWord>): Hit? {
         if (wakeTokens.isEmpty() || words.isEmpty()) return null
         val norm = words.map { ArabicNormalizer.normalize(it.word) }

@@ -148,6 +148,7 @@ class MainActivity : ComponentActivity() {
         setVoiceFeedback = { v -> lifecycleScope.launch { settingsRepo.setVoiceFeedback(v) } },
         setKeepCpu = { v -> lifecycleScope.launch { settingsRepo.setKeepCpuAwake(v) } },
         setDual = { v -> lifecycleScope.launch { settingsRepo.setDualRecognition(v) } },
+        setConfirm = { v -> lifecycleScope.launch { settingsRepo.setConfirmWhenUnsure(v) } },
         setTimeout = { v -> lifecycleScope.launch { settingsRepo.setCommandTimeout(v) } },
         setModel = { v -> lifecycleScope.launch { settingsRepo.setModel(v); restartIfRunning() } },
         importModel = { uri ->
@@ -200,11 +201,12 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun analyze(text: String): String {
-        val parser = ArabicCommandParser(kotlinx.coroutines.runBlocking { settingsRepo.current().wakePhrase })
+        val st = kotlinx.coroutines.runBlocking { settingsRepo.current() }
+        val parser = ArabicCommandParser(st.wakePhrase)
         val repo = ContactsRepository(this)
-        val matcher = ContactMatcher().apply { setContacts(repo.contacts()) }
+        val matcher = ContactMatcher(minScore = 0.55).apply { setContacts(repo.contacts()) }
         val intent = parser.parse(text)
-        val decision = CommandResolver(parser, matcher).resolveCommand(
+        val decision = CommandResolver(parser, matcher, askWhenUnsure = st.confirmWhenUnsure).resolveCommand(
             listOf(Hypothesis(text, text.split(' ').map { com.haitham.voiceassistant.model.RecognizedWord(it, 1f, 0f, 0f) }, Hypothesis.Source.FREE))
         )
         val contactsNote = if (!repo.hasPermission()) "\n(صلاحية جهات الاتصال غير ممنوحة)" else "\nعدد جهات الاتصال: ${repo.contacts().size}"

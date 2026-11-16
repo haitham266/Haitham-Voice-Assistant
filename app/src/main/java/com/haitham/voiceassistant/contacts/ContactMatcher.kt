@@ -99,6 +99,16 @@ class ContactMatcher(
             val js = ratio(qJoined, cJoined)
             if (js > total) { total = js; minTok = max(minTok, js) }
         }
+        // Character-level search of the whole name inside what was heard, ignoring
+        // where the recogniser put the spaces: "بعي لمنى مختار" ~ "عمنا مختار".
+        // The score rewards how much of the heard sound the name explains, so a short
+        // name ("مختار") does not beat a longer one that matches more ("عمنا مختار").
+        if (cJoined.length >= 3 && qJoined.length >= 3) {
+            val lit = explainedSimilarity(cJoined, qJoined)
+            val pho = explainedSimilarity(ArabicNormalizer.phonetic(cJoined), ArabicNormalizer.phonetic(qJoined)) * 0.97
+            val sub = max(lit, pho)
+            if (sub > total) { total = sub; minTok = max(minTok, sub) }
+        }
         return Scored(total, minTok)
     }
 
@@ -126,6 +136,35 @@ class ContactMatcher(
             if (a.isEmpty() && b.isEmpty()) return 1.0
             val d = levenshtein(a, b)
             return 1.0 - d.toDouble() / max(a.length, b.length)
+        }
+
+        /**
+         * Approximate substring match (Sellers algorithm): 1 - (edit distance of
+         * [needle] to its best-matching substring of [hay]) / needle length.
+         */
+        /** (characters of [name] found in [heard]) / average length of both. */
+        fun explainedSimilarity(name: String, heard: String): Double {
+            val dist = substringDistance(name, heard)
+            val matched = (name.length - dist).coerceAtLeast(0)
+            return matched / ((name.length + heard.length) / 2.0)
+        }
+
+        fun substringSimilarity(needle: String, hay: String): Double =
+            if (needle.isEmpty()) 0.0 else (1.0 - substringDistance(needle, hay).toDouble() / needle.length).coerceAtLeast(0.0)
+
+        private fun substringDistance(needle: String, hay: String): Int {
+            if (needle.isEmpty()) return 0
+            var prev = IntArray(hay.length + 1) // free start anywhere in hay
+            var cur = IntArray(hay.length + 1)
+            for (i in 1..needle.length) {
+                cur[0] = i
+                for (j in 1..hay.length) {
+                    val cost = if (needle[i - 1] == hay[j - 1]) 0 else 1
+                    cur[j] = min(min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost)
+                }
+                val t = prev; prev = cur; cur = t
+            }
+            return prev.min() // free end anywhere in hay
         }
 
         fun levenshtein(a: String, b: String): Int {

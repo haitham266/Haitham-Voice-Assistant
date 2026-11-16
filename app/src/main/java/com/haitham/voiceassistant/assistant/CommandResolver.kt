@@ -27,9 +27,35 @@ sealed class Decision {
 class CommandResolver(
     private val parser: ArabicCommandParser,
     private val matcher: ContactMatcher,
-    /** Numbers are dialled directly only if the recogniser was this sure. */
+    /**
+     * false (default, "iPhone-like"): always call the best match immediately; ask only
+     * when two people have practically the same name and nothing breaks the tie.
+     * true: the cautious mode (confirm uncertain names and low-confidence numbers).
+     */
+    private val askWhenUnsure: Boolean = false,
+    /** In cautious mode numbers are dialled directly only if the recogniser was this sure. */
     private val minNumberConfidence: Float = 0.6f
 ) {
+
+    /** Picks one candidate among close ones: clearly best score, then starred, then most called. */
+    private fun pickDecisive(cands: List<ContactCandidate>): ContactCandidate? {
+        val sorted = cands.sortedByDescending { it.score }
+        val top = sorted[0]
+        val second = sorted.getOrNull(1) ?: return top
+        if (top.score - second.score >= TIE_EPSILON) return top
+        val tied = sorted.filter { top.score - it.score < TIE_EPSILON }
+        val starred = tied.filter { it.contact.starred }
+        if (starred.size == 1) return starred[0]
+        val pool = if (starred.isNotEmpty()) starred else tied
+        val maxCalls = pool.maxOf { it.contact.callCount }
+        val mostCalled = pool.filter { it.contact.callCount == maxCalls }
+        return if (maxCalls > 0 && mostCalled.size == 1) mostCalled[0] else null
+    }
+
+    companion object {
+        /** Scores closer than this are treated as the same name. */
+        const val TIE_EPSILON = 0.02
+    }
 
     fun resolveCommand(hyps: List<Hypothesis>): Decision {
         val usable = hyps.filter { it.text.isNotBlank() }
@@ -43,14 +69,20 @@ class CommandResolver(
             VoiceIntent.OpenApp -> Decision.OpenApp
             VoiceIntent.Redial -> Decision.Redial
             is VoiceIntent.CallNumber ->
-                if (hyp.meanConfidence >= minNumberConfidence) Decision.CallDigits(intent.digits) else Decision.ConfirmDigits(intent.digits)
+                if (!askWhenUnsure || hyp.meanConfidence >= minNumberConfidence) Decision.CallDigits(intent.digits)
+                else Decision.ConfirmDigits(intent.digits)
             is VoiceIntent.CallContact -> {
                 // Combine the name readings of every recogniser that understood a call.
                 val variants = parsed.mapNotNull { (it.second as? VoiceIntent.CallContact)?.alternatives }.flatten().distinct()
                 when (val m = matcher.match(variants)) {
                     is MatchResult.Confident -> Decision.CallCandidate(m.candidate)
-                    is MatchResult.Ambiguous -> Decision.AskChoice(m.candidates)
-                    is MatchResult.NeedsConfirmation -> Decision.AskConfirm(m.candidate)
+                    is MatchResult.Ambiguous ->
+                        if (askWhenUnsure) Decision.AskChoice(m.candidates)
+                        else pickDecisive(m.candidates)?.let { Decision.CallCandidate(it) } ?: Decision.AskChoice(
+                            m.candidates.filter { m.candidates.maxOf { c -> c.score } - it.score < TIE_EPSILON }
+                        )
+                    is MatchResult.NeedsConfirmation ->
+                        if (askWhenUnsure) Decision.AskConfirm(m.candidate) else Decision.CallCandidate(m.candidate)
                     MatchResult.NotFound -> Decision.NotFound(intent.nameQuery)
                 }
             }
