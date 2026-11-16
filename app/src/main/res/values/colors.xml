@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="night">#FF0B1020</color>
+    <color name="accent">#FF3DDCFF</color>
+    <color name="accent_deep">#FF1F7AFF</color>
+</resources>

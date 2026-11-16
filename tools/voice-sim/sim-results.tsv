@@ -1,0 +1,40 @@
+n1_mb-ar1.wav	no-wake			0.00
+n1_mb-ar1_noise.wav	no-wake			0.00
+n1_mb-ar2.wav	no-wake			0.00
+n1_mb-ar2_noise.wav	no-wake			0.00
+n2_mb-ar1.wav	no-wake			0.00
+n2_mb-ar1_noise.wav	no-wake			0.00
+n2_mb-ar2.wav	no-wake			0.00
+n2_mb-ar2_noise.wav	no-wake			0.00
+n3_mb-ar1.wav	no-wake			0.00
+n3_mb-ar1_noise.wav	no-wake			0.00
+n3_mb-ar2.wav	no-wake			0.00
+n3_mb-ar2_noise.wav	no-wake			0.00
+n4_mb-ar1.wav	no-wake			0.00
+n4_mb-ar1_noise.wav	no-wake			0.00
+n4_mb-ar2.wav	no-wake			0.00
+n4_mb-ar2_noise.wav	no-wake			0.00
+w1_mb-ar1.wav	no-wake			0.00
+w1_mb-ar1_noise.wav	no-wake			0.00
+w1_mb-ar2.wav	WAKE	trailing	يا المساعد كانت	0.70
+w1_mb-ar2_noise.wav	no-wake			0.00
+w2_mb-ar1.wav	WAKE	trailing	صالح	0.22
+w2_mb-ar1_noise.wav	no-wake			0.00
+w2_mb-ar2.wav	WAKE		يا المساعد	0.90
+w2_mb-ar2_noise.wav	no-wake			0.00
+w3_mb-ar1.wav	no-wake			0.00
+w3_mb-ar1_noise.wav	no-wake			0.00
+w3_mb-ar2.wav	WAKE	trailing	يا المساعد المساعد	0.74
+w3_mb-ar2_noise.wav	no-wake			0.00
+w4_mb-ar1.wav	WAKE	trailing	اتصال أوقف سبعة سبعة سبعة بصالح لي ثمانين	0.70
+w4_mb-ar1_noise.wav	no-wake			0.00
+w4_mb-ar2.wav	WAKE	trailing	يا المساعد صالح سبعة اثنين ميتين	0.80
+w4_mb-ar2_noise.wav	no-wake			0.00
+w5_mb-ar1.wav	no-wake			0.00
+w5_mb-ar1_noise.wav	no-wake			0.00
+w5_mb-ar2.wav	WAKE	trailing	يا المساعد اوقف لي ستين	0.83
+w5_mb-ar2_noise.wav	no-wake			0.00
+w6_mb-ar1.wav	WAKE	trailing	دق	0.63
+w6_mb-ar1_noise.wav	no-wake			0.00
+w6_mb-ar2.wav	WAKE		يا المساعد لخالد	0.95
+w6_mb-ar2_noise.wav	WAKE		لخالد	0.93

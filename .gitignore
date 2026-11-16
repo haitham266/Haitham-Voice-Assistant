@@ -1,0 +1,17 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+.DS_Store
+captures/
+.cxx/
+# Large binaries: the model zip is downloaded/verified by Gradle (see app/build.gradle.kts)
+models/*.zip
+models/*/
+# Signing secrets are never committed
+keystore.properties
+*.jks
+*.keystore
+# Built APKs are delivered separately (GitHub limits files to 100 MB)
+dist/*.apk
