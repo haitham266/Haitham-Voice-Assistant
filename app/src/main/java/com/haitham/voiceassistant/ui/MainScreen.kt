@@ -187,7 +187,7 @@ private fun StatusChip(status: AssistantStatus) {
         AssistantStatus.LISTENING_COMMAND, AssistantStatus.AWAITING_CHOICE -> Listening
         AssistantStatus.PROCESSING, AssistantStatus.LOADING_MODEL, AssistantStatus.PAUSED_IN_CALL -> Warning
         AssistantStatus.ERROR, AssistantStatus.MIC_BLOCKED -> Danger
-        AssistantStatus.WAITING_WAKE_WORD -> Accent
+        AssistantStatus.WAITING_WAKE_WORD, AssistantStatus.WAITING_DIRECT_COMMAND -> Accent
     }
     Row(
         Modifier.clip(RoundedCornerShape(50)).background(c.copy(alpha = 0.14f)).padding(horizontal = 16.dp, vertical = 8.dp),

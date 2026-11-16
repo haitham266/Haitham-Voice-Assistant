@@ -59,6 +59,10 @@ data class SettingsActions(
     val setKeepCpu: (Boolean) -> Unit,
     val setDual: (Boolean) -> Unit,
     val setConfirm: (Boolean) -> Unit,
+    val setRequireWakeWord: (Boolean) -> Unit,
+    val setCommandEngine: (String) -> Unit,
+    val checkAi: () -> Unit,
+    val downloadArabic: () -> Unit,
     val setTimeout: (Int) -> Unit,
     val setModel: (String) -> Unit,
     val importModel: (Uri) -> Unit,
@@ -75,6 +79,7 @@ fun SettingsScreen(
     settings: AssistantSettings,
     state: AssistantUiState,
     hasCustomModel: Boolean,
+    aiStatus: String,
     importStatus: String,
     refreshKey: Int,
     actions: SettingsActions,
@@ -116,6 +121,37 @@ fun SettingsScreen(
             StatusRow("الظهور فوق التطبيقات (لأمر «افتح التطبيق»)", overlay) { Permissions.requestOverlay(ctx) }
             Hint("بعض الشركات (شاومي، هواوي، أوبو، سامسونج) لديها إعدادات إضافية: اسمح بـ«التشغيل التلقائي» و«بدون قيود» للبطارية من إعدادات التطبيق.")
             OutlinedButton(onClick = { Permissions.openAppSettings(ctx) }) { Text("فتح إعدادات التطبيق في النظام") }
+        }
+
+        Section("طريقة التشغيل") {
+            SwitchRow("الاستماع بدون كلمة تنبيه (قل «اتصل بـ…» مباشرة)", !settings.requireWakeWord) { actions.setRequireWakeWord(!it) }
+            Hint(
+                if (settings.requireWakeWord) "الوضع الحالي: تقول «${settings.wakePhrase}» أولاً ثم الأمر."
+                else "الوضع الحالي: يكفي أن تقول «اتصل بعمنا مختار» أو «دق على أحمد» مباشرة. " +
+                    "ينتبه المحرك الخفيف لكلمات الاتصال فقط (اتصل، دق، كلم، عيط، رن…) ثم يفهم الجملة كاملة. " +
+                    "تنبيه: قد يتصل إذا سمع جملة اتصال واضحة باسم من جهاتك في حديث قريب أو من التلفاز، ويستهلك بطارية أكثر قليلاً."
+            )
+        }
+
+        Section("محرك فهم الأوامر") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(settings.commandEngine == AssistantSettings.ENGINE_AI, { actions.setCommandEngine(AssistantSettings.ENGINE_AI) })
+                Text("الذكاء الاصطناعي في الهاتف (مستحسن – أدق وأسرع ويفهم اللهجات)")
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(settings.commandEngine == AssistantSettings.ENGINE_VOSK, { actions.setCommandEngine(AssistantSettings.ENGINE_VOSK) })
+                Text("Vosk فقط (النموذج المضمّن)")
+            }
+            Hint("الحالة: ${aiStatus.ifBlank { "لم يُفحص بعد" }}")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = actions.checkAi) { Text("فحص") }
+                Button(onClick = actions.downloadArabic) { Text("تنزيل العربية") }
+            }
+            Hint(
+                "يعمل داخل الهاتف دون إنترنت بعد تنزيل حزمة العربية مرة واحدة. إن لم ينجح زر التنزيل: " +
+                    "تطبيق Google ← الإعدادات ← الصوت ← التعرف على الكلام بلا اتصال ← العربية. " +
+                    "إن لم يتوفر المحرك يستخدم التطبيق Vosk تلقائياً."
+            )
         }
 
         Section("كلمة التنبيه") {

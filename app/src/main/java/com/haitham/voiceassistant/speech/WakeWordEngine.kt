@@ -13,7 +13,16 @@ import org.vosk.Recognizer
  * spoken in the same breath ("يا مساعد اتصل بأحمد") can be re-decoded by the
  * command recogniser; it is discarded right after.
  */
-class WakeWordEngine(model: Model, grammarJson: String?, private val detector: WakeWordDetector) : AutoCloseable {
+class WakeWordEngine(
+    model: Model,
+    grammarJson: String?,
+    private val detector: WakeWordDetector,
+    /**
+     * Direct mode with the AI recogniser: every utterance (after 300 ms of speech) is
+     * handed over, starting from its first syllable; the AI result decides if it is a command.
+     */
+    private val triggerOnSpeech: Boolean = false
+) : AutoCloseable {
 
     data class Result(val confidence: Float, val trailingSpeech: Boolean)
 
@@ -26,6 +35,7 @@ class WakeWordEngine(model: Model, grammarJson: String?, private val detector: W
     private val preRoll = ArrayDeque<ShortArray>()
     private var inUtterance = false
     private var partialHits = 0
+    private var speechFrames = 0
 
     /**
      * @param speech whether the VAD considers this frame part of speech.
@@ -46,11 +56,16 @@ class WakeWordEngine(model: Model, grammarJson: String?, private val detector: W
         }
         if (!inUtterance) {
             inUtterance = true
+            speechFrames = 0
             utterLen = 0
             for (p in preRoll) { append(p, p.size); if (rec.acceptWaveForm(p, p.size)) evaluate(rec.result)?.let { preRoll.clear(); return it } }
             preRoll.clear()
         }
         append(buf, n)
+        if (triggerOnSpeech) {
+            if (++speechFrames >= 3) { speechFrames = 0; rec.reset(); inUtterance = false; return Result(1f, trailingSpeech = true) }
+            return null
+        }
         if (rec.acceptWaveForm(buf, n)) {
             partialHits = 0
             val r = evaluate(rec.result)
@@ -72,7 +87,8 @@ class WakeWordEngine(model: Model, grammarJson: String?, private val detector: W
     private fun evaluate(json: String): Result? {
         val words = SpeechRecognitionEngine.parseResult(json).second
         val hit = detector.detect(words) ?: return null
-        val trailing = words.any { it.start >= hit.endTime - 0.01f && it.end > hit.endTime + 0.05f && it.conf > 0.3f }
+        val trailing = detector.isTriggerMode ||
+            words.any { it.start >= hit.endTime - 0.01f && it.end > hit.endTime + 0.05f && it.conf > 0.3f }
         return Result(hit.confidence, trailing)
     }
 

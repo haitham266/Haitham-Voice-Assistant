@@ -30,6 +30,7 @@ class PipelineFixtureTest {
         File(out, "wake.json").writeText(wake.json)
         File(out, "cmd.json").writeText(GrammarBuilder.commandGrammar(book.map { it.displayName } + "يا مساعد", vocab))
         File(out, "missing.txt").writeText(wake.missingWords.joinToString(","))
+        File(out, "trigger.json").writeText(GrammarBuilder.triggerGrammar(vocab))
         val tr = System.getenv("HVA_TRANSCRIPTS")?.let { File(it) }
         if (tr != null && tr.exists()) {
             val matcher = ContactMatcher().apply { setContacts(book) }

@@ -53,6 +53,7 @@ object AssistantNotifications {
     fun foreground(context: Context, status: AssistantStatus, detail: String?, wakePhrase: String): Notification {
         val text = when (status) {
             AssistantStatus.WAITING_WAKE_WORD -> "قل «$wakePhrase» ثم الأمر"
+            AssistantStatus.WAITING_DIRECT_COMMAND -> "قل «اتصل بـ…» مباشرة"
             else -> detail?.takeIf { it.isNotBlank() } ?: status.label
         }
         return NotificationCompat.Builder(context, CHANNEL_STATUS)

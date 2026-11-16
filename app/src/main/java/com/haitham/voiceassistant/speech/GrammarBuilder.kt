@@ -68,6 +68,23 @@ object GrammarBuilder {
         "الأول", "الاول", "الثاني", "الثالث", "الرابع", "نعم", "ايوه", "أيوه", "لا", "إلغاء", "الغاء", "خلاص", "اكيد", "تمام"
     )
 
+    /** Words that start a command in "without wake word" mode. */
+    val triggerWords = listOf(
+        "اتصل", "اتصلي", "دق", "دقي", "دقلي", "كلم", "كلمي", "كلملي", "عيط", "عيطلي", "رن", "ارن", "اضرب",
+        "اطلب", "أعد", "اعد", "عاود", "أوقف", "اوقف", "توقف", "افتح"
+    )
+
+    val triggerWordsNormalized: Set<String> get() = triggerWords.map { ArabicNormalizer.normalize(it) }.toSet()
+
+    /** Grammar for trigger mode: command verbs + fillers (that are not verbs). */
+    fun triggerGrammar(vocab: Vocabulary): String {
+        val trig = triggerWordsNormalized
+        val resolved = vocab.resolve(triggerWords + fillerWords)
+        val verbs = triggerWords.mapNotNull { resolved[it] }
+        val fillers = fillerWords.mapNotNull { resolved[it] }.filter { ArabicNormalizer.normalize(it) !in trig }
+        return toJson(verbs + fillers)
+    }
+
     fun toJson(words: Collection<String>): String =
         words.distinct().joinToString(prefix = "[", postfix = "]", separator = ",") {
             "\"" + it.replace("\\", "").replace("\"", "") + "\""

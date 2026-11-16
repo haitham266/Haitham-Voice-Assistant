@@ -22,6 +22,7 @@ import com.haitham.voiceassistant.settings.AssistantSettings
 import com.haitham.voiceassistant.settings.SettingsRepository
 import com.haitham.voiceassistant.speech.GrammarBuilder
 import com.haitham.voiceassistant.speech.ModelManager
+import com.haitham.voiceassistant.speech.OnDeviceRecognizer
 import com.haitham.voiceassistant.speech.SpeechRecognitionEngine
 import com.haitham.voiceassistant.speech.SpeechRecognitionEngine.Purpose
 import com.haitham.voiceassistant.speech.Vocabulary
@@ -65,6 +66,23 @@ class AssistantController(
     @Volatile private var wakeGrammar: String? = null
     @Volatile private var commandGrammar: String? = null
     private var wakeDetector = WakeWordDetector(AssistantSettings.DEFAULT_WAKE_PHRASE, 1)
+    @Volatile private var triggerGrammar: String? = null
+    private var triggerDetector = WakeWordDetector(AssistantSettings.DEFAULT_WAKE_PHRASE, 1, GrammarBuilder.triggerWordsNormalized)
+    @Volatile private var contactNames: List<String> = emptyList()
+
+    /** The phone's on-device AI recogniser (used for the command itself). */
+    private val onDevice = OnDeviceRecognizer(context)
+
+    /** One command round: results of the AI recogniser and of Vosk, merged when both are in. */
+    private class Session(val purpose: Purpose) {
+        var ai = false          // AI recogniser running for this round
+        var micMode = false     // AI recogniser uses the mic itself (Vosk not running)
+        var aiHyps: List<Hypothesis>? = null
+        var aiFailed = false
+        var voskHyps: List<Hypothesis>? = null
+        var done = false
+    }
+    private var session: Session? = null
 
     private enum class Pending { NONE, CHOICE, CONFIRM_CONTACT, CONFIRM_NUMBER }
     private var pending = Pending.NONE
@@ -94,7 +112,13 @@ class AssistantController(
                 contactsRepo.onChanged = { worker.execute { rebuildCommandGrammar() } }
                 main.post { contactsRepo.startObserving() }
                 engine = SpeechRecognitionEngine(audio, model!!, supportsGrammar, this).also { it.start() }
-                backToWake()
+                main.post {
+                    onDevice.checkSupport {
+                        AssistantRepository.aiInfo(it.label)
+                        if (session == null && pending == Pending.NONE) backToWake() // re-pick the listening mode
+                    }
+                    backToWake()
+                }
             } catch (t: Throwable) {
                 Log.e(tag, "start failed", t)
                 AssistantRepository.error("تعذر تشغيل المحرك الصوتي: ${t.message}")
@@ -111,6 +135,7 @@ class AssistantController(
             model?.close(); model = null
         }
         worker.shutdown()
+        main.post { onDevice.shutdown() }
         feedback.release()
     }
 
@@ -123,6 +148,8 @@ class AssistantController(
         }
         if (old.wakePhrase != new.wakePhrase || old.sensitivity != new.sensitivity) {
             worker.execute { rebuildGrammars(); if (pending == Pending.NONE) main.post { backToWake() } }
+        } else if (old.requireWakeWord != new.requireWakeWord || old.commandEngine != new.commandEngine) {
+            main.post { if (pending == Pending.NONE && session == null) backToWake() }
         }
     }
 
@@ -131,6 +158,8 @@ class AssistantController(
         parser = ArabicCommandParser(settings.wakePhrase)
         resolver = CommandResolver(parser, matcher, askWhenUnsure = settings.confirmWhenUnsure)
         wakeDetector = WakeWordDetector(settings.wakePhrase, settings.sensitivity)
+        triggerDetector = WakeWordDetector(settings.wakePhrase, settings.sensitivity, GrammarBuilder.triggerWordsNormalized)
+        triggerGrammar = if (supportsGrammar) GrammarBuilder.triggerGrammar(v) else null
         if (supportsGrammar) {
             val wg = GrammarBuilder.wakeGrammar(settings.wakePhrase, v)
             if (wg.missingWords.isNotEmpty()) {
@@ -146,6 +175,7 @@ class AssistantController(
         contactsRepo.invalidate()
         val contacts = contactsRepo.contacts()
         matcher.setContacts(contacts)
+        contactNames = contacts.map { it.displayName }.filter { it.isNotBlank() }
         commandGrammar = if (supportsGrammar) {
             GrammarBuilder.commandGrammar(contacts.map { it.displayName } + settings.wakePhrase, v)
         } else null
@@ -154,8 +184,104 @@ class AssistantController(
 
     private fun backToWake() {
         pending = Pending.NONE; pendingCandidates = emptyList(); pendingNumber = null; retries = 0
-        engine?.listenForWake(wakeGrammar, wakeDetector, settings.sensitivity)
-        onStatus(AssistantStatus.WAITING_WAKE_WORD, null)
+        session = null
+        if (settings.requireWakeWord) engine?.listenForWake(wakeGrammar, wakeDetector, settings.sensitivity)
+        else engine?.listenForWake(
+            triggerGrammar, triggerDetector, settings.sensitivity,
+            // With the AI recogniser every utterance is checked by it (much more accurate than
+            // spotting "اتصل" with Vosk); without it, Vosk spots the call words.
+            triggerOnSpeech = aiUsable() && !onDevice.audioSourceUnsupported && android.os.Build.VERSION.SDK_INT >= 33
+        )
+        onStatus(waitingStatus(), null)
+    }
+
+    private fun waitingStatus() =
+        if (settings.requireWakeWord) AssistantStatus.WAITING_WAKE_WORD else AssistantStatus.WAITING_DIRECT_COMMAND
+
+    private fun aiUsable(): Boolean =
+        settings.commandEngine == AssistantSettings.ENGINE_AI && OnDeviceRecognizer.isAvailable(context) &&
+            onDevice.support !is OnDeviceRecognizer.Support.NoArabic && onDevice.support !is OnDeviceRecognizer.Support.NotAvailable
+
+    private fun biasing(): List<String> =
+        contactNames.take(380) + listOf("اتصل ب", "دق على", "كلم", "اتصل بالرقم", "أعد الاتصال", "أوقف الاستماع", "افتح التطبيق")
+
+    /**
+     * Starts listening to the command: the phone's AI recogniser (fed with our audio,
+     * including what was already said) in parallel with Vosk as a fallback.
+     */
+    private fun startCommand(purpose: Purpose, replay: Boolean, muteMs: Long) {
+        val e = engine ?: return
+        val s = Session(purpose)
+        session = s
+        val timeout = if (purpose == Purpose.TEST) 6000L else settings.commandTimeoutSec * 1000L
+        val useAi = aiUsable()
+        if (useAi && !onDevice.audioSourceUnsupported && android.os.Build.VERSION.SDK_INT >= 33) {
+            s.ai = true
+            val stream = onDevice.start(streamed = true, biasing = biasing(), cb = aiCallback(s))
+            e.listen(purpose, commandGrammar, settings.dualRecognition, timeout, replay = replay, muteMs = muteMs, sink = stream)
+        } else if (useAi) {
+            // This phone does not accept streamed audio: hand the microphone to the AI recogniser.
+            s.ai = true; s.micMode = true
+            e.releaseMic()
+            main.postDelayed({ if (session === s) onDevice.start(streamed = false, biasing = biasing(), cb = aiCallback(s)) }, 150)
+        } else {
+            e.listen(purpose, commandGrammar, settings.dualRecognition, timeout, replay = replay, muteMs = muteMs)
+        }
+    }
+
+    private fun aiCallback(s: Session) = object : OnDeviceRecognizer.Callback {
+        override fun onPartial(text: String) { if (session === s) AssistantRepository.heard(text) }
+        override fun onResults(hyps: List<Hypothesis>) = main.post { s.aiHyps = hyps; tryFinish(s) }.let {}
+        override fun onError(code: Int, audioSourceRefused: Boolean) = main.post {
+            Log.w(tag, "AI recogniser error $code (refused=$audioSourceRefused)")
+            s.aiFailed = true; tryFinish(s)
+        }.let {}
+    }
+
+    private fun tryFinish(s: Session) {
+        if (s.done || session !== s) return
+        val aiDone = !s.ai || s.aiHyps != null || s.aiFailed
+        val voskDone = s.micMode || s.voskHyps != null
+        if (!aiDone || !voskDone) return
+        s.done = true
+        session = null
+        finishSession(s)
+    }
+
+    private fun actionable(d: Decision) = d !is Decision.NotUnderstood && d !is Decision.NothingHeard && d !is Decision.NotFound
+
+    private fun finishSession(s: Session) {
+        val ai = s.aiHyps.orEmpty()
+        val vosk = s.voskHyps.orEmpty()
+        val shown = (ai.firstOrNull() ?: vosk.firstOrNull())?.text.orEmpty()
+        AssistantRepository.heard(if (shown.isBlank()) "(لم يُسمع كلام واضح)" else shown)
+        onStatus(AssistantStatus.PROCESSING, null)
+        if (s.purpose == Purpose.TEST) {
+            val lines = (ai + vosk).map {
+                val src = when (it.source) {
+                    Hypothesis.Source.ON_DEVICE -> "ذكاء الهاتف"; Hypothesis.Source.GRAMMAR -> "Vosk مقيد"; else -> "Vosk حر"
+                }
+                "[$src] ${it.text} → ${resolver.resolveCommand(listOf(it))}"
+            }
+            AssistantRepository.test(
+                if (lines.isEmpty()) "لم يُسمع كلام" + if (s.aiFailed) " (محرك الهاتف لم يرجع نتيجة)" else "" else lines.joinToString("\n")
+            )
+            backToWake(); return
+        }
+        // The AI recogniser decides first; Vosk is only a fallback.
+        val dAi = if (ai.isNotEmpty()) resolver.resolveCommand(ai) else null
+        val dVosk = if (vosk.isNotEmpty()) resolver.resolveCommand(vosk) else null
+        val d = when {
+            dAi != null && actionable(dAi) -> dAi
+            dVosk != null && actionable(dVosk) -> dVosk
+            else -> dAi ?: dVosk ?: Decision.NothingHeard
+        }
+        if (!settings.requireWakeWord && !actionable(d)) {
+            // Direct mode: ordinary conversation is ignored silently.
+            Log.i(tag, "direct mode: ignored '$shown' ($d)")
+            backToWake(); return
+        }
+        execute(d)
     }
 
     fun runRecognitionTest() {
@@ -164,7 +290,7 @@ class AssistantController(
         AssistantRepository.test("تكلم الآن…")
         e.idle()
         val beep = feedback.readyBeep()
-        e.listen(Purpose.TEST, commandGrammar, true, 6000, muteMs = beep)
+        startCommand(Purpose.TEST, replay = false, muteMs = beep)
         onStatus(AssistantStatus.LISTENING_COMMAND, "اختبار التعرف")
     }
 
@@ -176,16 +302,25 @@ class AssistantController(
     override fun onWake(confidence: Float, trailingSpeech: Boolean) = main.post {
         Log.i(tag, "wake (conf=$confidence, trailing=$trailingSpeech)")
         AssistantRepository.heard("…")
-        val beep = feedback.readyBeep()
-        // If the user is already saying the command (same breath), never drop audio for the beep.
-        engine?.listen(
-            Purpose.COMMAND, commandGrammar, settings.dualRecognition, settings.commandTimeoutSec * 1000L,
-            replay = trailingSpeech, muteMs = if (trailingSpeech) 0 else beep
-        )
+        // Direct mode: the user is already saying the command -> no beep. Wake mode: beep,
+        // and never drop audio for the beep if the command is said in the same breath.
+        val beep = if (settings.requireWakeWord) feedback.readyBeep() else 0L
+        startCommand(Purpose.COMMAND, replay = trailingSpeech, muteMs = if (trailingSpeech) 0 else beep)
         onStatus(AssistantStatus.LISTENING_COMMAND, null)
     }.let {}
 
     override fun onCommand(purpose: Purpose, hypotheses: List<Hypothesis>) = main.post {
+        val s = session
+        if (s != null && s.purpose == purpose && purpose != Purpose.CHOICE) {
+            s.voskHyps = hypotheses
+            if (s.ai && s.aiHyps == null && !s.aiFailed) {
+                onStatus(AssistantStatus.PROCESSING, null)
+                // Speech ended (stream closed): give the AI recogniser a moment to finalise.
+                main.postDelayed({ if (!s.done && s.aiHyps == null) { onDevice.cancel(); s.aiFailed = true; tryFinish(s) } }, 2500)
+            }
+            tryFinish(s)
+            return@post
+        }
         val text = hypotheses.firstOrNull()?.text.orEmpty()
         AssistantRepository.heard(if (text.isBlank()) "(لم يُسمع كلام واضح)" else text)
         onStatus(AssistantStatus.PROCESSING, null)
@@ -211,7 +346,7 @@ class AssistantController(
 
     override fun onMicBlocked(blocked: Boolean) = main.post {
         if (blocked) onStatus(AssistantStatus.MIC_BLOCKED, null)
-        else if (AssistantRepository.state.value.status == AssistantStatus.MIC_BLOCKED) onStatus(AssistantStatus.WAITING_WAKE_WORD, null)
+        else if (AssistantRepository.state.value.status == AssistantStatus.MIC_BLOCKED) onStatus(waitingStatus(), null)
     }.let {}
 
     override fun onFatal(message: String) = main.post {

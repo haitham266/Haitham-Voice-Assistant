@@ -21,6 +21,7 @@ object AssistantRepository {
         if (kotlin.math.abs(cur - l) > 0.02f) _state.update { it.copy(level = l) }
     }
     fun modelInfo(t: String) = _state.update { it.copy(modelInfo = t) }
+    fun aiInfo(t: String) = _state.update { it.copy(aiEngineInfo = t) }
     fun test(t: String) = _state.update { it.copy(testTranscript = t) }
     fun error(t: String) = _state.update { it.copy(error = t, status = AssistantStatus.ERROR) }
 }

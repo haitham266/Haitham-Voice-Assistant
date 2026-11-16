@@ -58,6 +58,8 @@ class MainActivity : ComponentActivity() {
     private var importStatus by mutableStateOf("")
     private var hasCustomModel by mutableStateOf(false)
     private var startAfterPermissions = false
+    private var aiStatus by mutableStateOf("")
+    private val onDevice by lazy { com.haitham.voiceassistant.speech.OnDeviceRecognizer(this) }
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         permissionsVersion++
@@ -95,6 +97,7 @@ class MainActivity : ComponentActivity() {
                     } else {
                         SettingsScreen(
                             settings = settings, state = state, hasCustomModel = hasCustomModel,
+                            aiStatus = aiStatus.ifBlank { state.aiEngineInfo },
                             importStatus = importStatus, refreshKey = pv, actions = settingsActions(),
                             onBack = { showSettings = false }
                         )
@@ -149,6 +152,15 @@ class MainActivity : ComponentActivity() {
         setKeepCpu = { v -> lifecycleScope.launch { settingsRepo.setKeepCpuAwake(v) } },
         setDual = { v -> lifecycleScope.launch { settingsRepo.setDualRecognition(v) } },
         setConfirm = { v -> lifecycleScope.launch { settingsRepo.setConfirmWhenUnsure(v) } },
+        setRequireWakeWord = { v -> lifecycleScope.launch { settingsRepo.setRequireWakeWord(v) } },
+        setCommandEngine = { v -> lifecycleScope.launch { settingsRepo.setCommandEngine(v) } },
+        checkAi = { aiStatus = "جارٍ الفحص…"; onDevice.checkSupport { aiStatus = it.label; AssistantRepository.aiInfo(it.label) } },
+        downloadArabic = {
+            onDevice.checkSupport { st ->
+                if (st is com.haitham.voiceassistant.speech.OnDeviceRecognizer.Support.Ready) aiStatus = st.label
+                else onDevice.downloadArabic { msg -> aiStatus = msg }
+            }
+        },
         setTimeout = { v -> lifecycleScope.launch { settingsRepo.setCommandTimeout(v) } },
         setModel = { v -> lifecycleScope.launch { settingsRepo.setModel(v); restartIfRunning() } },
         importModel = { uri ->

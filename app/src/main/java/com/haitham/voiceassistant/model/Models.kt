@@ -5,6 +5,7 @@ enum class AssistantStatus(val label: String) {
     STOPPED("متوقف"),
     LOADING_MODEL("جارٍ تحميل النموذج الصوتي"),
     WAITING_WAKE_WORD("نشط – بانتظار كلمة التنبيه"),
+    WAITING_DIRECT_COMMAND("نشط – قل الأمر مباشرة"),
     LISTENING_COMMAND("يستمع للأمر"),
     PROCESSING("يعالج الأمر"),
     AWAITING_CHOICE("بانتظار اختيارك"),
@@ -18,7 +19,7 @@ data class RecognizedWord(val word: String, val conf: Float, val start: Float, v
 
 /** A recognition hypothesis from one recogniser. */
 data class Hypothesis(val text: String, val words: List<RecognizedWord>, val source: Source) {
-    enum class Source { GRAMMAR, FREE }
+    enum class Source { GRAMMAR, FREE, ON_DEVICE }
 
     val meanConfidence: Float
         get() = if (words.isEmpty()) 0f else words.map { it.conf }.average().toFloat()
@@ -75,5 +76,7 @@ data class AssistantUiState(
     val level: Float = 0f,
     val modelInfo: String = "",
     val testTranscript: String = "",
+    /** Status of the phone's on-device AI recogniser (Arabic installed or not). */
+    val aiEngineInfo: String = "",
     val error: String? = null
 )

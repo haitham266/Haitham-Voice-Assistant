@@ -9,9 +9,19 @@ import com.haitham.voiceassistant.nlu.ArabicNormalizer
  * "garbage" filler words, so ordinary speech is absorbed by fillers instead of
  * being forced onto the wake phrase.
  */
-class WakeWordDetector(wakePhrase: String, sensitivity: Int) {
+class WakeWordDetector(
+    wakePhrase: String,
+    sensitivity: Int,
+    /**
+     * "Without wake word" mode: instead of the wake phrase, any of these command
+     * words (اتصل / دق / كلم ...) starts the command stage. Null = wake phrase mode.
+     */
+    private val triggerWords: Set<String>? = null
+) {
 
     val wakeTokens: List<String> = ArabicNormalizer.tokens(wakePhrase)
+
+    val isTriggerMode: Boolean get() = triggerWords != null
 
     /** Minimum mean confidence of the wake words (sensitivity 0=low .. 2=high). */
     val threshold: Float = when (sensitivity) {
@@ -31,6 +41,7 @@ class WakeWordDetector(wakePhrase: String, sensitivity: Int) {
      */
     fun matchesPartial(text: String): Boolean {
         val t = ArabicNormalizer.tokens(text)
+        if (triggerWords != null) return t.any { it in triggerWords }
         val k = wakeTokens.size
         if (k == 0 || t.size < k) return allowLastWordOnly && t.contains(wakeTokens.lastOrNull())
         for (i in 0..t.size - k) if ((0 until k).all { t[i + it] == wakeTokens[it] }) return true
@@ -38,6 +49,10 @@ class WakeWordDetector(wakePhrase: String, sensitivity: Int) {
     }
 
     fun detect(words: List<RecognizedWord>): Hit? {
+        if (triggerWords != null) {
+            val w = words.firstOrNull { ArabicNormalizer.normalize(it.word) in triggerWords && it.conf >= threshold } ?: return null
+            return Hit(w.start, w.conf) // the command starts at the trigger word itself
+        }
         if (wakeTokens.isEmpty() || words.isEmpty()) return null
         val norm = words.map { ArabicNormalizer.normalize(it.word) }
         val k = wakeTokens.size

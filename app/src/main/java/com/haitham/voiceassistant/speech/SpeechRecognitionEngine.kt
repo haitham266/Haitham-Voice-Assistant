@@ -46,15 +46,23 @@ class SpeechRecognitionEngine(
 
     enum class Purpose { COMMAND, CHOICE, TEST }
 
+    /** Receives the command audio in parallel (the phone's on-device AI recogniser). */
+    interface AudioSink {
+        fun write(buf: ShortArray, n: Int)
+        fun close()
+    }
+
     private enum class Mode { WAKE, LISTEN, IDLE }
 
     private sealed class Req {
-        data class Wake(val grammarJson: String?, val detector: WakeWordDetector, val sensitivity: Int) : Req()
+        data class Wake(val grammarJson: String?, val detector: WakeWordDetector, val sensitivity: Int, val onSpeech: Boolean) : Req()
         data class Listen(
             val purpose: Purpose, val grammarJson: String?, val useFree: Boolean,
-            val timeoutMs: Long, val replay: Boolean, val muteMs: Long
+            val timeoutMs: Long, val replay: Boolean, val muteMs: Long, val sink: AudioSink?
         ) : Req()
         data object Idle : Req()
+        /** Stop and release the microphone (so the system recogniser can use it). */
+        data object ReleaseMic : Req()
     }
 
     private val queue = ConcurrentLinkedQueue<Req>()
@@ -79,6 +87,7 @@ class SpeechRecognitionEngine(
     private val freeText = StringBuilder()
     private var lastPartialAt = 0L
     private var replayRequested = false
+    private var sink: AudioSink? = null
 
     fun start() {
         if (running) return
@@ -92,15 +101,20 @@ class SpeechRecognitionEngine(
         thread = null
     }
 
-    fun listenForWake(wakeGrammarJson: String?, detector: WakeWordDetector, sensitivity: Int) {
-        queue += Req.Wake(wakeGrammarJson, detector, sensitivity)
+    fun listenForWake(wakeGrammarJson: String?, detector: WakeWordDetector, sensitivity: Int, triggerOnSpeech: Boolean = false) {
+        queue += Req.Wake(wakeGrammarJson, detector, sensitivity, triggerOnSpeech)
     }
 
-    fun listen(purpose: Purpose, grammarJson: String?, useFree: Boolean, timeoutMs: Long, replay: Boolean = false, muteMs: Long = 0) {
-        queue += Req.Listen(purpose, grammarJson, useFree, timeoutMs, replay, muteMs)
+    fun listen(
+        purpose: Purpose, grammarJson: String?, useFree: Boolean, timeoutMs: Long,
+        replay: Boolean = false, muteMs: Long = 0, sink: AudioSink? = null
+    ) {
+        queue += Req.Listen(purpose, grammarJson, useFree, timeoutMs, replay, muteMs, sink)
     }
 
     fun idle() { queue += Req.Idle }
+
+    fun releaseMic() { queue += Req.ReleaseMic }
 
     private fun loop() {
         val buf = ShortArray(VoiceAudioManager.FRAME_SAMPLES)
@@ -167,7 +181,7 @@ class SpeechRecognitionEngine(
             is Req.Wake -> {
                 closeListen()
                 wakeEngine?.close()
-                wakeEngine = WakeWordEngine(model, r.grammarJson, r.detector)
+                wakeEngine = WakeWordEngine(model, r.grammarJson, r.detector, r.onSpeech)
                 vad = EnergyVad(r.sensitivity)
                 mode = Mode.WAKE
             }
@@ -176,6 +190,7 @@ class SpeechRecognitionEngine(
                 listenPurpose = r.purpose
                 listenGrammarRec = if (supportsGrammar && r.grammarJson != null) Recognizer(model, 16000f, r.grammarJson).apply { setWords(true) } else null
                 listenFreeRec = if (r.useFree || listenGrammarRec == null) Recognizer(model, 16000f).apply { setWords(true) } else null
+                sink = r.sink
                 listenStart = SystemClock.elapsedRealtime()
                 listenTimeout = r.timeoutMs
                 listenSpeechSeen = false
@@ -195,6 +210,7 @@ class SpeechRecognitionEngine(
                 mode = Mode.LISTEN
             }
             Req.Idle -> { closeListen(); mode = Mode.IDLE }
+            Req.ReleaseMic -> { closeListen(); mode = Mode.IDLE; audio.close() }
         }
     }
 
@@ -211,6 +227,7 @@ class SpeechRecognitionEngine(
 
     // --------------------------------------------------------- LISTEN stage
     private fun feedListen(buf: ShortArray, n: Int) {
+        sink?.write(buf, n)
         listenGrammarRec?.let { rec ->
             if (rec.acceptWaveForm(buf, n)) collect(rec.result, grammarWords, grammarText)
         }
@@ -253,6 +270,7 @@ class SpeechRecognitionEngine(
     }
 
     private fun closeListen() {
+        sink?.close(); sink = null
         listenGrammarRec?.close(); listenGrammarRec = null
         listenFreeRec?.close(); listenFreeRec = null
     }

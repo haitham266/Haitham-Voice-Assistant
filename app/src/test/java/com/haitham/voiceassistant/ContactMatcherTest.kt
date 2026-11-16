@@ -188,6 +188,32 @@ class ContactMatcherTest {
         assertNull(WakeWordDetector("يا مساعد", 0).detect(listOf(w("يا", 0.66f, 0f, 0.2f), w("مساعد", 0.44f, 0.2f, 0.7f))))
     }
 
+    @Test fun directModeTriggerWords() {
+        val trig = com.haitham.voiceassistant.speech.GrammarBuilder.triggerWordsNormalized
+        val d = WakeWordDetector("يا مساعد", 1, trig)
+        assertTrue(d.isTriggerMode)
+        assertTrue(d.matchesPartial("اتصل بعمنا"))
+        assertTrue(d.matchesPartial("دق على"))
+        assertTrue(d.matchesPartial("كلم"))
+        assertFalse(d.matchesPartial("مرحبا كيف حالك"))
+        assertFalse(d.matchesPartial("يا مساعد")) // the wake phrase itself is not a trigger in direct mode
+        assertTrue(d.detect(listOf(w("في", 0.9f, 0f, 0.2f), w("اتصل", 0.8f, 0.2f, 0.6f))) != null)
+        assertNull(d.detect(listOf(w("اتصل", 0.2f, 0.2f, 0.6f)))) // too unsure
+        // wake-phrase mode is unchanged and accepts partials with the phrase
+        val wake = WakeWordDetector("يا مساعد", 1)
+        assertFalse(wake.isTriggerMode)
+        assertTrue(wake.matchesPartial("يا مساعد اتصل"))
+        assertFalse(wake.matchesPartial("اتصل بأحمد"))
+    }
+
+    @Test fun aiStyleTranscripts() {
+        // Typical full sentences from a neural recogniser (with or without the wake phrase).
+        assertEquals("عمنا مختار", familyCall("يا مساعد اتصل بعمنا مختار"))
+        assertEquals("عمنا مختار", familyCall("اتصل على عمنا مختار"))
+        assertEquals("عمنا مختار", familyCall("يامساعد اتصل بعمنا مختار"))
+        assertEquals("خالي مختار", familyCall("دق لخالي مختار لو سمحت"))
+    }
+
     @Test fun vadGatesSilence() {
         val vad = EnergyVad(1)
         repeat(30) { assertFalse(vad.update(80.0)) } // quiet room
